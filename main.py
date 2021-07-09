@@ -1,5 +1,6 @@
 import logging as log
 import zipfile
+from typing import List
 
 import aiohttp
 import asyncio
@@ -21,6 +22,11 @@ TEST_ARTICLES = (
      'Какое влияние имеет ускорение Россией дедолларизации?',
      ),
 )
+
+RESULT_TEMPLATE = """Заголовок: {title}
+Рейтинг: {score}
+Слов в статье: {words_count}
+"""
 
 
 class LazyJaundiceException(Exception):
@@ -65,7 +71,13 @@ async def fetch(session, url):
         return await response.text()
 
 
-async def process_article(session, morph, charged_words, url, title):
+async def process_article(session,
+                          morph,
+                          charged_words,
+                          result: List,
+                          url,
+                          title,
+                          ):
     html = await fetch(session,
                        url)
     cleaned_text = adapters.inosmi_ru.sanitize(html, plaintext=True)
@@ -75,28 +87,14 @@ async def process_article(session, morph, charged_words, url, title):
     score = text_tools.calculate_jaundice_rate(split_text,
                                                charged_words)
     words_count = len(split_text)
-    print('Заголовок:', title)
-    print('Рейтинг:', score)
-    print('Слов в статье:', words_count)
-
-
-async def main_old():
-    async with aiohttp.ClientSession() as session:
-        html = await fetch(session,
-                           'https://inosmi.ru/politic/20210621/249959311.html')
-        cleaned_text = adapters.inosmi_ru.sanitize(html, plaintext=True)
-        split_text = text_tools.split_by_words(LazyJaundice.get_morph(),
-                                               cleaned_text)
-
-        rate = text_tools.calculate_jaundice_rate(split_text,
-                                                  LazyJaundice.
-                                                  get_charged_words())
-
-        print('Рейтинг {}'.format(rate))
-        print('Слов в статье: {}'.format(len(split_text)))
+    result.append(RESULT_TEMPLATE.format(title=title,
+                                         score=score,
+                                         words_count=words_count,
+                                         ))
 
 
 async def main():
+    result = []
     async with aiohttp.ClientSession() as session:
         async with create_task_group() as tg:
             for article in TEST_ARTICLES:
@@ -105,7 +103,13 @@ async def main():
                     session,
                     LazyJaundice.get_morph(),
                     LazyJaundice.get_charged_words(),
+                    result,
                     *article,
                 )
+
+    # не асинхронно как-то
+    for res in result:
+        print(res)
+
 
 asyncio.run(main())
