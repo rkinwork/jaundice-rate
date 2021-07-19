@@ -2,6 +2,7 @@ import logging as log
 import zipfile
 from typing import List
 from enum import Enum
+from urllib.parse import urlparse
 
 import aiohttp
 import asyncio
@@ -15,6 +16,12 @@ CHARGED_DICT_ZIP = 'charged_dict.zip'
 TEST_ARTICLES = (
     ('https://inosmi.corrupted/politic/20210621/249959311.html',
      'corrupted',
+     ),
+    ('https://lenta.ru/news/2021/07/19/baidenhck/',
+     'Байден рассказал о различии между российскими и китайскими кибератаками'
+     ),
+    ('https://ria.ru/20210719/rasizm-1741747346.html',
+     'Гондурас победил Германию. И это только начало чудес'
      ),
     ('https://inosmi.ru/politic/20210621/249959311.html',
      'Нападение на Советский Союз 80 лет назад',
@@ -37,6 +44,7 @@ RESULT_TEMPLATE = """Заголовок: {title}
 class ProcessingStatus(Enum):
     OK = 'OK'
     FETCH_ERROR = 'FETCH_ERROR'
+    PARSING_ERROR = 'PARSING_ERROR'
 
 
 class LazyJaundiceException(Exception):
@@ -91,29 +99,36 @@ async def process_article(session,
     status: ProcessingStatus = ProcessingStatus.OK
     score: [float] = None
     words_count: [int] = None
-    html: str = ''
+
+    def append_result() -> None:
+        result.append(RESULT_TEMPLATE.format(title=title,
+                                             status=status.value,
+                                             score=score,
+                                             words_count=words_count,
+                                             ))
 
     try:
         html = await fetch(session,
                            url)
     except aiohttp.ClientConnectorError:
         status = ProcessingStatus.FETCH_ERROR
-        title = 'URL not exist'
+        title = 'URL not exists'
+        append_result()
+        return
 
-    if status is ProcessingStatus.OK:
+    try:
         cleaned_text = adapters.inosmi_ru.sanitize(html, plaintext=True)
-        split_text = text_tools.split_by_words(morph,
-                                               cleaned_text)
+    except adapters.ArticleNotFound:
+        status = ProcessingStatus.PARSING_ERROR
+        host = urlparse(url).hostname
+        title = 'Статья на {}'.format(host)
+        append_result()
+        return
 
-        score = text_tools.calculate_jaundice_rate(split_text,
-                                                   charged_words)
-        words_count = len(split_text)
-
-    result.append(RESULT_TEMPLATE.format(title=title,
-                                         status=status.value,
-                                         score=score,
-                                         words_count=words_count,
-                                         ))
+    split_text = text_tools.split_by_words(morph, cleaned_text)
+    score = text_tools.calculate_jaundice_rate(split_text, charged_words)
+    words_count = len(split_text)
+    append_result()
 
 
 async def main():
