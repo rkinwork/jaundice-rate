@@ -1,17 +1,21 @@
 import logging as log
 import zipfile
 from typing import List
+from enum import Enum
 
 import aiohttp
 import asyncio
 import pymorphy2
-from anyio import create_task_group, run
+from anyio import create_task_group
 
 import adapters
 import text_tools
 
 CHARGED_DICT_ZIP = 'charged_dict.zip'
 TEST_ARTICLES = (
+    ('https://inosmi.corrupted/politic/20210621/249959311.html',
+     'corrupted',
+     ),
     ('https://inosmi.ru/politic/20210621/249959311.html',
      'Нападение на Советский Союз 80 лет назад',
      ),
@@ -24,9 +28,15 @@ TEST_ARTICLES = (
 )
 
 RESULT_TEMPLATE = """Заголовок: {title}
+Статус: {status}
 Рейтинг: {score}
 Слов в статье: {words_count}
 """
+
+
+class ProcessingStatus(Enum):
+    OK = 'OK'
+    FETCH_ERROR = 'FETCH_ERROR'
 
 
 class LazyJaundiceException(Exception):
@@ -78,16 +88,29 @@ async def process_article(session,
                           url,
                           title,
                           ):
-    html = await fetch(session,
-                       url)
-    cleaned_text = adapters.inosmi_ru.sanitize(html, plaintext=True)
-    split_text = text_tools.split_by_words(morph,
-                                           cleaned_text)
+    status: ProcessingStatus = ProcessingStatus.OK
+    score: [float] = None
+    words_count: [int] = None
+    html: str = ''
 
-    score = text_tools.calculate_jaundice_rate(split_text,
-                                               charged_words)
-    words_count = len(split_text)
+    try:
+        html = await fetch(session,
+                           url)
+    except aiohttp.ClientConnectorError:
+        status = ProcessingStatus.FETCH_ERROR
+        title = 'URL not exist'
+
+    if status is ProcessingStatus.OK:
+        cleaned_text = adapters.inosmi_ru.sanitize(html, plaintext=True)
+        split_text = text_tools.split_by_words(morph,
+                                               cleaned_text)
+
+        score = text_tools.calculate_jaundice_rate(split_text,
+                                                   charged_words)
+        words_count = len(split_text)
+
     result.append(RESULT_TEMPLATE.format(title=title,
+                                         status=status.value,
                                          score=score,
                                          words_count=words_count,
                                          ))
