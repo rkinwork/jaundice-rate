@@ -1,8 +1,10 @@
 import logging as log
+import time
 import zipfile
 from typing import List
 from enum import Enum
 from urllib.parse import urlparse
+import contextlib
 
 import aiohttp
 import asyncio
@@ -52,6 +54,16 @@ class ProcessingStatus(Enum):
 
 class LazyJaundiceException(Exception):
     pass
+
+
+@contextlib.contextmanager
+def log_time(name: str = ''):
+    start = time.monotonic()
+    try:
+        yield
+    finally:
+        finish = time.monotonic()
+    log.info('Анализ {} закончен за {:.2f} сек'.format(name, finish - start))
 
 
 class LazyJaundice(object):
@@ -133,13 +145,16 @@ async def process_article(session,
         append_to_result()
         return
 
-    split_text = text_tools.split_by_words(morph, cleaned_text)
+    with log_time(title):
+        split_text = text_tools.split_by_words(morph, cleaned_text)
+
     score = text_tools.calculate_jaundice_rate(split_text, charged_words)
     words_count = len(split_text)
     append_to_result()
 
 
 async def main():
+    log.basicConfig(level=log.INFO)
     result = []
     async with aiohttp.ClientSession() as session:
         async with create_task_group() as tg:
