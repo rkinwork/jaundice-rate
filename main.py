@@ -8,11 +8,13 @@ import aiohttp
 import asyncio
 import pymorphy2
 from anyio import create_task_group
+from async_timeout import timeout
 
 import adapters
 import text_tools
 
 CHARGED_DICT_ZIP = 'charged_dict.zip'
+REQUEST_TIMEOUT_SEC = 1.5
 TEST_ARTICLES = (
     ('https://inosmi.corrupted/politic/20210621/249959311.html',
      'corrupted',
@@ -45,6 +47,7 @@ class ProcessingStatus(Enum):
     OK = 'OK'
     FETCH_ERROR = 'FETCH_ERROR'
     PARSING_ERROR = 'PARSING_ERROR'
+    TIMEOUT = 'TIMEOUT'
 
 
 class LazyJaundiceException(Exception):
@@ -100,7 +103,7 @@ async def process_article(session,
     score: [float] = None
     words_count: [int] = None
 
-    def append_result() -> None:
+    def append_to_result() -> None:
         result.append(RESULT_TEMPLATE.format(title=title,
                                              status=status.value,
                                              score=score,
@@ -108,12 +111,17 @@ async def process_article(session,
                                              ))
 
     try:
-        html = await fetch(session,
-                           url)
+        async with timeout(REQUEST_TIMEOUT_SEC):
+            html = await fetch(session,
+                               url)
     except aiohttp.ClientConnectorError:
         status = ProcessingStatus.FETCH_ERROR
         title = 'URL not exists'
-        append_result()
+        append_to_result()
+        return
+    except asyncio.TimeoutError:
+        status = ProcessingStatus.TIMEOUT
+        append_to_result()
         return
 
     try:
@@ -122,13 +130,13 @@ async def process_article(session,
         status = ProcessingStatus.PARSING_ERROR
         host = urlparse(url).hostname
         title = 'Статья на {}'.format(host)
-        append_result()
+        append_to_result()
         return
 
     split_text = text_tools.split_by_words(morph, cleaned_text)
     score = text_tools.calculate_jaundice_rate(split_text, charged_words)
     words_count = len(split_text)
-    append_result()
+    append_to_result()
 
 
 async def main():
