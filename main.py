@@ -1,7 +1,7 @@
 import logging as log
 import time
 import zipfile
-from typing import List
+from typing import List, Iterable, Tuple, NamedTuple, Optional
 from enum import Enum
 from urllib.parse import urlparse
 import contextlib
@@ -17,26 +17,6 @@ import text_tools
 
 CHARGED_DICT_ZIP = 'charged_dict.zip'
 REQUEST_TIMEOUT_SEC = 1.5
-TEST_ARTICLES = (
-    ('https://inosmi.corrupted/politic/20210621/249959311.html',
-     'corrupted',
-     ),
-    ('https://lenta.ru/news/2021/07/19/baidenhck/',
-     'Байден рассказал о различии между российскими и китайскими кибератаками'
-     ),
-    ('https://ria.ru/20210719/rasizm-1741747346.html',
-     'Гондурас победил Германию. И это только начало чудес'
-     ),
-    ('https://inosmi.ru/politic/20210621/249959311.html',
-     'Нападение на Советский Союз 80 лет назад',
-     ),
-    ('https://inosmi.ru/politic/20210628/250000579.html',
-     'Россия потребовала сдать оружие! Боевые самолеты начали полеты на малой высоте',
-     ),
-    ('https://inosmi.ru/politic/20210629/249997600.html',
-     'Какое влияние имеет ускорение Россией дедолларизации?',
-     ),
-)
 
 RESULT_TEMPLATE = """Заголовок: {title}
 Статус: {status}
@@ -54,6 +34,33 @@ class ProcessingStatus(Enum):
 
 class LazyJaundiceException(Exception):
     pass
+
+
+class Article(NamedTuple):
+    url: str
+    title: Optional[str] = None
+
+
+TEST_ARTICLES = (
+    Article('https://inosmi.corrupted/politic/20210621/249959311.html',
+            'corrupted',
+            ),
+    Article('https://lenta.ru/news/2021/07/19/baidenhck/',
+            'Байден рассказал о различии между российскими и китайскими кибератаками'
+            ),
+    Article('https://ria.ru/20210719/rasizm-1741747346.html',
+            'Гондурас победил Германию. И это только начало чудес'
+            ),
+    Article('https://inosmi.ru/politic/20210621/249959311.html',
+            'Нападение на Советский Союз 80 лет назад',
+            ),
+    Article('https://inosmi.ru/politic/20210628/250000579.html',
+            'Россия потребовала сдать оружие! Боевые самолеты начали полеты на малой высоте',
+            ),
+    Article('https://inosmi.ru/politic/20210629/249997600.html',
+            'Какое влияние имеет ускорение Россией дедолларизации?',
+            ),
+)
 
 
 @contextlib.contextmanager
@@ -116,11 +123,13 @@ async def process_article(session,
     words_count: [int] = None
 
     def append_to_result() -> None:
-        result.append(RESULT_TEMPLATE.format(title=title,
-                                             status=status.value,
-                                             score=score,
-                                             words_count=words_count,
-                                             ))
+        result.append({
+            'status': status.value,
+            'url': url,
+            'score': score,
+            'words_count': words_count,
+            'title': title,
+        })
 
     try:
         async with timeout(REQUEST_TIMEOUT_SEC):
@@ -153,24 +162,30 @@ async def process_article(session,
     append_to_result()
 
 
-async def main():
-    log.basicConfig(level=log.INFO)
+async def process(links: Iterable[Article]):
     result = []
     async with aiohttp.ClientSession() as session:
         async with create_task_group() as tg:
-            for article in TEST_ARTICLES:
+            for article in links:
                 tg.start_soon(
                     process_article,
                     session,
                     LazyJaundice.get_morph(),
                     LazyJaundice.get_charged_words(),
                     result,
-                    *article,
+                    article.url,
+                    article.title,
                 )
+    return result
 
+
+async def main():
+    log.basicConfig(level=log.INFO)
+    result = await process(TEST_ARTICLES)
     # не асинхронно как-то
     for res in result:
-        print(res)
+        print(RESULT_TEMPLATE.format(**res))
 
 
-asyncio.run(main())
+if __name__ == '__main__':
+    asyncio.run(main())
