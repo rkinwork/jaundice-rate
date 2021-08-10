@@ -135,7 +135,7 @@ async def process_article(session,
         async with timeout(REQUEST_TIMEOUT_SEC):
             html = await fetch(session,
                                url)
-    except aiohttp.ClientConnectorError:
+    except (aiohttp.ClientConnectorError, aiohttp.InvalidURL):
         status = ProcessingStatus.FETCH_ERROR
         title = 'URL not exists'
         append_to_result()
