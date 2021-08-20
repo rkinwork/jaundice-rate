@@ -1,165 +1,12 @@
 import logging as log
-import time
-import zipfile
-from typing import List, Iterable, Tuple, NamedTuple, Optional
-from enum import Enum
-from urllib.parse import urlparse
-import contextlib
+from typing import Iterable
 
 import aiohttp
 import asyncio
-import pymorphy2
 from anyio import create_task_group
-from async_timeout import timeout
 
-import adapters
-import text_tools
-
-CHARGED_DICT_ZIP = 'charged_dict.zip'
-REQUEST_TIMEOUT_SEC = 1.5
-
-RESULT_TEMPLATE = """Заголовок: {title}
-Статус: {status}
-Рейтинг: {score}
-Слов в статье: {words_count}
-"""
-
-
-class ProcessingStatus(Enum):
-    OK = 'OK'
-    FETCH_ERROR = 'FETCH_ERROR'
-    PARSING_ERROR = 'PARSING_ERROR'
-    TIMEOUT = 'TIMEOUT'
-
-
-class LazyJaundiceException(Exception):
-    pass
-
-
-class Article(NamedTuple):
-    url: str
-    title: Optional[str] = None
-
-
-TEST_ARTICLES = (
-    Article('https://inosmi.corrupted/politic/20210621/249959311.html',
-            'corrupted',
-            ),
-    Article('https://lenta.ru/news/2021/07/19/baidenhck/',
-            'Байден рассказал о различии между российскими и китайскими кибератаками'
-            ),
-    Article('https://ria.ru/20210719/rasizm-1741747346.html',
-            'Гондурас победил Германию. И это только начало чудес'
-            ),
-    Article('https://inosmi.ru/politic/20210621/249959311.html',
-            'Нападение на Советский Союз 80 лет назад',
-            ),
-    Article('https://inosmi.ru/politic/20210628/250000579.html',
-            'Россия потребовала сдать оружие! Боевые самолеты начали полеты на малой высоте',
-            ),
-    Article('https://inosmi.ru/politic/20210629/249997600.html',
-            'Какое влияние имеет ускорение Россией дедолларизации?',
-            ),
-)
-
-
-@contextlib.contextmanager
-def log_time(name: str = ''):
-    start = time.monotonic()
-    try:
-        yield
-    finally:
-        finish = time.monotonic()
-    log.info('Анализ {} закончен за {:.2f} сек'.format(name, finish - start))
-
-
-class LazyJaundice(object):
-    _morph = None
-    _charged_words = None
-
-    def __init__(self):
-        raise LazyJaundiceException('Do not instantiate this class')
-
-    @classmethod
-    def get_morph(cls):
-        if cls._morph is None:
-            cls._morph = pymorphy2.MorphAnalyzer()
-        return cls._morph
-
-    @classmethod
-    def get_charged_words(cls):
-        if cls._charged_words is None:
-            cls._charged_words = []
-            with zipfile.ZipFile(CHARGED_DICT_ZIP) as zf:
-                for f_name in zf.namelist():
-                    if not f_name.endswith('.txt'):
-                        continue
-                    with zf.open(f_name) as f:
-                        cls._charged_words.extend(f.readlines())
-
-            cls._charged_words = [
-                word.decode('utf-8').strip()
-                for word in cls._charged_words
-            ]
-            log.info("Слов: {}".format(len(cls._charged_words)))
-        return cls._charged_words
-
-
-async def fetch(session, url):
-    async with session.get(url) as response:
-        response.raise_for_status()
-        return await response.text()
-
-
-async def process_article(session,
-                          morph,
-                          charged_words,
-                          result: List,
-                          url,
-                          title,
-                          ):
-    status: ProcessingStatus = ProcessingStatus.OK
-    score: [float] = None
-    words_count: [int] = None
-
-    def append_to_result() -> None:
-        result.append({
-            'status': status.value,
-            'url': url,
-            'score': score,
-            'words_count': words_count,
-            'title': title,
-        })
-
-    try:
-        async with timeout(REQUEST_TIMEOUT_SEC):
-            html = await fetch(session,
-                               url)
-    except (aiohttp.ClientConnectorError, aiohttp.InvalidURL):
-        status = ProcessingStatus.FETCH_ERROR
-        title = 'URL not exists'
-        append_to_result()
-        return
-    except asyncio.TimeoutError:
-        status = ProcessingStatus.TIMEOUT
-        append_to_result()
-        return
-
-    try:
-        cleaned_text = adapters.inosmi_ru.sanitize(html, plaintext=True)
-    except adapters.ArticleNotFound:
-        status = ProcessingStatus.PARSING_ERROR
-        host = urlparse(url).hostname
-        title = 'Статья на {}'.format(host)
-        append_to_result()
-        return
-
-    with log_time(title):
-        split_text = text_tools.split_by_words(morph, cleaned_text)
-
-    score = text_tools.calculate_jaundice_rate(split_text, charged_words)
-    words_count = len(split_text)
-    append_to_result()
+from jaundice_tools import Article, process_article, LazyJaundice
+from jaundice_tools import DATA_TESTS, RESULT_TEMPLATE
 
 
 async def process(links: Iterable[Article]):
@@ -181,10 +28,11 @@ async def process(links: Iterable[Article]):
 
 async def main():
     log.basicConfig(level=log.INFO)
-    result = await process(TEST_ARTICLES)
+    test_articles = [el[0] for el in DATA_TESTS]
+    result = await process(test_articles)
     # не асинхронно как-то
     for res in result:
-        print(RESULT_TEMPLATE.format(**res))
+        print(RESULT_TEMPLATE.format(**res._asdict()))
 
 
 if __name__ == '__main__':
