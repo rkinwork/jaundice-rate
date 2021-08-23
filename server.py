@@ -37,6 +37,7 @@ async def process_urls(request: web.Request):
         )
     prepared_urls = [Article(url=url) for url in urls]
     result = await process(prepared_urls)
+    result = [el._asdict() for el in result]
     return web.json_response(data=result, dumps=partial(dumps, indent=4))
 
 

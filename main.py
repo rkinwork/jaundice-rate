@@ -1,15 +1,15 @@
 import logging as log
-from typing import Iterable
+from typing import Iterable, List
 
 import aiohttp
 import asyncio
 from anyio import create_task_group
 
 from jaundice_tools import Article, process_article, LazyJaundice
-from jaundice_tools import DATA_TESTS, RESULT_TEMPLATE
+from jaundice_tools import DATA_TESTS, RESULT_TEMPLATE, Result
 
 
-async def process(links: Iterable[Article]):
+async def process(links: Iterable[Article]) -> List[Result]:
     result = []
     async with aiohttp.ClientSession() as session:
         async with create_task_group() as tg:
