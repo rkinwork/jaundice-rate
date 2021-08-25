@@ -1,11 +1,12 @@
 import logging as log
 from typing import Iterable, List
+from dataclasses import asdict
 
 import aiohttp
 import asyncio
 from anyio import create_task_group
 
-from jaundice_tools import Article, process_article, LazyJaundice
+from jaundice_tools import Article, JaundiceTools, process_article
 from jaundice_tools import DATA_TESTS, RESULT_TEMPLATE, Result
 
 
@@ -17,8 +18,8 @@ async def process(links: Iterable[Article]) -> List[Result]:
                 tg.start_soon(
                     process_article,
                     session,
-                    LazyJaundice.get_morph(),
-                    LazyJaundice.get_charged_words(),
+                    JaundiceTools.get_morph(),
+                    JaundiceTools.get_charged_words(),
                     result,
                     article.url,
                     article.title,
@@ -29,10 +30,10 @@ async def process(links: Iterable[Article]) -> List[Result]:
 async def main():
     log.basicConfig(level=log.INFO)
     test_articles = [el[0] for el in DATA_TESTS]
-    result = await process(test_articles)
+    results = await process(test_articles)
     # не асинхронно как-то
-    for res in result:
-        print(RESULT_TEMPLATE.format(**res._asdict()))
+    for article_res in results:
+        print(RESULT_TEMPLATE.format(**asdict(article_res)))
 
 
 if __name__ == '__main__':

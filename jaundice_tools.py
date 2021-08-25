@@ -5,6 +5,7 @@ from typing import List, NamedTuple, Optional
 from enum import Enum
 from urllib.parse import urlparse
 import contextlib
+from dataclasses import dataclass
 
 import aiohttp
 import asyncio
@@ -32,7 +33,7 @@ class ProcessingStatus(Enum):
     TIMEOUT = 'TIMEOUT'
 
 
-class LazyJaundiceException(Exception):
+class JaundiceToolsException(Exception):
     pass
 
 
@@ -41,7 +42,8 @@ class Article(NamedTuple):
     title: Optional[str] = None
 
 
-class Result(NamedTuple):
+@dataclass
+class Result:
     status: str
     url: str
     score: Optional[float] = None
@@ -151,12 +153,12 @@ def log_time(name: str = ''):
     log.info('Анализ {} закончен за {:.2f} сек'.format(name, finish - start))
 
 
-class LazyJaundice(object):
+class JaundiceTools(object):
     _morph = None
     _charged_words = None
 
     def __init__(self):
-        raise LazyJaundiceException('Do not instantiate this class')
+        raise JaundiceToolsException('Do not instantiate this class')
 
     @classmethod
     def get_morph(cls):
@@ -173,20 +175,19 @@ class LazyJaundice(object):
                     if not f_name.endswith('.txt'):
                         continue
                     with zf.open(f_name) as f:
-                        cls._charged_words.extend(f.readlines())
+                        words = [line.decode('utf-8').strip() for line in f]
+                        cls._charged_words = words
 
-            cls._charged_words = [
-                word.decode('utf-8').strip()
-                for word in cls._charged_words
-            ]
-            log.info("Слов: {}".format(len(cls._charged_words)))
+            if len(cls._charged_words) == 0:
+                raise JaundiceToolsException('Empty charged words dict file')
+            log.info('Слов: {}'.format(len(cls._charged_words)))
         return cls._charged_words
 
-
-async def fetch(session, url):
-    async with session.get(url) as response:
-        response.raise_for_status()
-        return await response.text()
+    @staticmethod
+    async def fetch(session, url):
+        async with session.get(url) as response:
+            response.raise_for_status()
+            return await response.text()
 
 
 async def process_article(session,
@@ -195,64 +196,56 @@ async def process_article(session,
                           result: List[Result],
                           url,
                           title,
-                          request_timeout_sec=None,
+                          request_timeout_sec=REQUEST_TIMEOUT_SEC,
                           ):
-    request_timeout_sec = request_timeout_sec or REQUEST_TIMEOUT_SEC
-    status: ProcessingStatus = ProcessingStatus.OK
-    score: [float] = None
-    words_count: [int] = None
-
-    def append_to_result() -> None:
-        result.append(Result(
-            **{
-                'status': status.value,
-                'url': url,
-                'score': score,
-                'words_count': words_count,
-                'title': title,
-            },
-        )
-        )
+    # хотя и в ревью было замечание избавится от return
+    # не хотелось усложнять flow.
+    # И если грохнется выполнение - то гарантированно уже будет какой-то ответ
+    res_data = Result(
+        status=ProcessingStatus.FETCH_ERROR.value,
+        url=url,
+        title=title
+    )
+    result.append(res_data)
 
     try:
         async with timeout(request_timeout_sec):
-            html = await fetch(session,
-                               url)
+            html = await JaundiceTools.fetch(session, url)
     except (aiohttp.ClientConnectorError, aiohttp.InvalidURL):
-        status = ProcessingStatus.FETCH_ERROR
-        title = 'URL not exists'
-        append_to_result()
+        res_data.status = ProcessingStatus.FETCH_ERROR.value
+        res_data.title = 'URL not exists'
         return
     except asyncio.TimeoutError:
-        status = ProcessingStatus.TIMEOUT
-        append_to_result()
+        res_data.status = ProcessingStatus.TIMEOUT.value
         return
 
     try:
         cleaned_text = adapters.inosmi_ru.sanitize(html, plaintext=True)
     except adapters.ArticleNotFound:
-        status = ProcessingStatus.PARSING_ERROR
+        res_data.status = ProcessingStatus.PARSING_ERROR.value
         host = urlparse(url).hostname
-        title = 'Статья на {}'.format(host)
-        append_to_result()
+        res_data.title = 'Статья на {}'.format(host)
         return
 
     with log_time(title):
         split_text = text_tools.split_by_words(morph, cleaned_text)
 
-    score = text_tools.calculate_jaundice_rate(split_text, charged_words)
-    words_count = len(split_text)
-    append_to_result()
+    res_data.score = text_tools.calculate_jaundice_rate(
+        split_text,
+        charged_words,
+    )
+    res_data.words_count = len(split_text)
+    res_data.status = ProcessingStatus.OK.value
 
 
 @pytest.fixture()
 def morph_instance():
-    return LazyJaundice.get_morph()
+    return JaundiceTools.get_morph()
 
 
 @pytest.fixture()
 def charged_words():
-    return LazyJaundice.get_charged_words()
+    return JaundiceTools.get_charged_words()
 
 
 @pytest.fixture(params=DATA_TESTS)
