@@ -199,7 +199,7 @@ async def process_article(session,
                           request_timeout_sec=REQUEST_TIMEOUT_SEC,
                           ):
     # хотя и в ревью было замечание избавится от return
-    # не хотелось усложнять flow.
+    # не хотелось усложнять flow и всю обработку запихивать в один try
     # И если грохнется выполнение - то гарантированно уже будет какой-то ответ
     res_data = Result(
         status=ProcessingStatus.FETCH_ERROR.value,
@@ -228,7 +228,7 @@ async def process_article(session,
         return
 
     with log_time(title):
-        words = text_tools.split_by_words(morph, cleaned_text)
+        words = await text_tools.split_by_words(morph, cleaned_text)
 
     res_data.score = text_tools.calculate_jaundice_rate(
         words,
