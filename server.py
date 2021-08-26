@@ -4,41 +4,37 @@ from dataclasses import asdict
 
 from aiohttp import web
 
-from main import process, Article
+from main import process, RawArticle
 
-REQ_KEY = 'urls'
-ERROR_MESSAGE_TEMPLATE = 'there are no "{}" key in query string'
+URLS_KEY = 'urls'
+NO_URLS_ERROR_MESSAGE = f'there is no "{URLS_KEY}" key in query string'
 MAX_URLS_COUNT = 10
-ERROR_MESSAGE_COUNT = f'too many urls in request, ' \
+MAX_URLS_COUNT_ERROR_MESSAGE = f'too many urls in request, ' \
                       f'should be {MAX_URLS_COUNT} or less'
 
 
-def prepare_error(error_txt: str):
-    return dumps({'error': error_txt})
+def send_error(error_text: str):
+    raise web.HTTPBadRequest(
+        text=dumps({'error': error_text}),
+        content_type='application/json',
+    )
 
 
 async def process_urls(request: web.Request):
-    value = request.query.get(REQ_KEY)
-    if value is None:
-        raise web.HTTPBadRequest(
-            text=prepare_error(
-                error_txt=ERROR_MESSAGE_TEMPLATE.format(REQ_KEY),
-            ),
-            content_type='application/json',
-        )
+    raw_urls = request.query.get(URLS_KEY)
+    if raw_urls is None:
+        send_error(NO_URLS_ERROR_MESSAGE)
 
-    urls = value.split(',')
+    urls = raw_urls.split(',')
     if len(urls) > MAX_URLS_COUNT:
-        raise web.HTTPBadRequest(
-            text=prepare_error(
-                error_txt=ERROR_MESSAGE_COUNT,
-            ),
-            content_type='application/json',
-        )
-    prepared_urls = [Article(url=url) for url in urls]
-    results = await process(prepared_urls)
-    results = [asdict(result_el) for result_el  in results]
-    return web.json_response(data=results, dumps=partial(dumps, indent=4))
+        send_error(MAX_URLS_COUNT_ERROR_MESSAGE)
+
+    raw_articles = [RawArticle(url=url) for url in urls]
+    articles = await process(raw_articles)
+    return web.json_response(
+        data=[asdict(article) for article in articles],
+        dumps=partial(dumps, indent=4),
+    )
 
 
 def main():

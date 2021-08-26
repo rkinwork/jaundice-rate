@@ -6,35 +6,39 @@ import aiohttp
 import asyncio
 from anyio import create_task_group
 
-from jaundice_tools import Article, JaundiceTools, process_article
-from jaundice_tools import DATA_TESTS, RESULT_TEMPLATE, Result
+from jaundice_tools import RawArticle, JaundiceTools, process_article
+from jaundice_tools import DATA_TESTS, RESPONSE_TEMPLATE, Article
 
 
-async def process(links: Iterable[Article]) -> List[Result]:
-    result = []
+async def process(raw_articles: Iterable[RawArticle]) -> List[Article]:
+    articles = []
     async with aiohttp.ClientSession() as session:
         async with create_task_group() as tg:
-            for article in links:
+            for raw_article in raw_articles:
                 tg.start_soon(
                     process_article,
                     session,
                     JaundiceTools.get_morph(),
                     JaundiceTools.get_charged_words(),
-                    result,
-                    article.url,
-                    article.title,
+                    articles,
+                    raw_article.url,
+                    raw_article.title,
                 )
-    return result
+    return articles
 
 
-async def main():
+async def process_links():
     log.basicConfig(level=log.INFO)
     test_articles = [el[0] for el in DATA_TESTS]
-    results = await process(test_articles)
+    articles = await process(test_articles)
     # не асинхронно как-то
-    for article_res in results:
-        print(RESULT_TEMPLATE.format(**asdict(article_res)))
+    for article in articles:
+        print(RESPONSE_TEMPLATE.format(**asdict(article)))
+
+
+def main():
+    asyncio.run(process_links())
 
 
 if __name__ == '__main__':
-    asyncio.run(main())
+    main()
