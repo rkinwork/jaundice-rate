@@ -228,13 +228,13 @@ async def process_article(session,
         return
 
     with log_time(title):
-        split_text = text_tools.split_by_words(morph, cleaned_text)
+        words = text_tools.split_by_words(morph, cleaned_text)
 
     res_data.score = text_tools.calculate_jaundice_rate(
-        split_text,
+        words,
         charged_words,
     )
-    res_data.words_count = len(split_text)
+    res_data.words_count = len(words)
     res_data.status = ProcessingStatus.OK.value
 
 
